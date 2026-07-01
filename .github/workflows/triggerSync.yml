@@ -8,4 +8,4 @@ jobs:
       - name: Send POST Request
         env:
           CICD_SERVICE_API_KEY: ${{ secrets.CICD_SERVICE_API_KEY }} # or vars.CICD_SERVICE_API_KEY
-        run: echo "$CICD_SERVICE_API_KEY"
+        run: echo " $CICD_SERVICE_API_KEY"
