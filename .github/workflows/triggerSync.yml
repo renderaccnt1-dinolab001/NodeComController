@@ -7,4 +7,4 @@ jobs:
     steps:
       - name: Send POST Request
         run: |
-          echo "$CICD_SERVICE_API_KEY"
+          echo "$env.CICD_SERVICE_API_KEY"
