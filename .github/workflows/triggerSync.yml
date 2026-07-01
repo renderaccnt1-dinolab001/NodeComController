@@ -6,4 +6,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Send POST Request
-        run: echo $GITHUB_ENV
+        env:
+          CICD_SERVICE_API_KEY: "test"
+        run: echo $CICD_SERVICE_API_KEY
