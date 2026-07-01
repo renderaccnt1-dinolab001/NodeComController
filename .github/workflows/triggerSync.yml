@@ -7,5 +7,5 @@ jobs:
     steps:
       - name: Send POST Request
         env:
-          CICD_SERVICE_API_KEY: "test"
+          CICD_SERVICE_API_KEY: ${{ secrets.CICD_SERVICE_API_KEY }}
         run: echo $CICD_SERVICE_API_KEY
