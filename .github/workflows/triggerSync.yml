@@ -7,5 +7,6 @@ jobs:
     steps:
       - name: Send POST Request
         run: |
-          curl -X POST https://nodecomcicdservice.onrender.com/sync/trigger-sync \
-            -H "Authorization: Bearer ${{ secrets.CICD_SERVICE_API_KEY }}"
+          curl -X POST 'https://nodecomcicdservice.onrender.com/sync/trigger' \
+            -H 'accept: application/json' \
+            -H 'x-api-key: ${{ secrets.CICD_SERVICE_API_KEY }}'
