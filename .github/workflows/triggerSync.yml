@@ -9,6 +9,6 @@ jobs:
         env:
           CICD_SERVICE_API_KEY: ${{ secrets.CICD_SERVICE_API_KEY }}
         run: |
-          # curl -X POST 'https://nodecomcicdservice.onrender.com/sync/trigger' \
-          #   -H 'accept: application/json' \
-          #   -H "x-api-key: $CICD_SERVICE_API_KEY"
+          curl -X POST 'https://nodecomcicdservice.onrender.com/sync/trigger' \
+            -H 'accept: application/json' \
+            -H "x-api-key: $CICD_SERVICE_API_KEY"
