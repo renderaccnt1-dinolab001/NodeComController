@@ -23,16 +23,34 @@ async def register_node(request: RegisterNodeRequest, session: Session = Depends
     Validates Google Auth token, upserts account and node, assigns group/role.
     Returns session_token, role, and (if worker) the leader URL.
     """
-    # 1. Verify token with Google
+    # 1. Verify token with Google.
+    #    Colab's auth flow may produce either an OIDC ID token (JWT) or a plain
+    #    OAuth2 access token.  The two tokeninfo params are different, so we
+    #    try id_token first and fall back to access_token.
+    token_info = None
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"https://oauth2.googleapis.com/tokeninfo?id_token={request.google_auth_token}"
             )
-            resp.raise_for_status()
-            token_info = resp.json()
-    except httpx.HTTPStatusError:
-        raise HTTPException(status_code=401, detail="Invalid Google auth token")
+            if resp.status_code == 200:
+                token_info = resp.json()
+            else:
+                # Fall back to access_token verification
+                resp2 = await client.get(
+                    f"https://oauth2.googleapis.com/tokeninfo?access_token={request.google_auth_token}"
+                )
+                if resp2.status_code == 200:
+                    token_info = resp2.json()
+                else:
+                    raise HTTPException(
+                        status_code=401,
+                        detail=f"Google rejected the token as both an ID token and an access token. "
+                               f"id_token status: {resp.status_code}, "
+                               f"access_token status: {resp2.status_code}.",
+                    )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to verify token: {str(e)}")
 
