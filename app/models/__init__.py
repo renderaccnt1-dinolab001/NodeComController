@@ -60,6 +60,7 @@ class ComputeNode(SQLModel, table=True):
     id: str = Field(primary_key=True)  # Google OAuth 'sub'
     created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
     url_addr: Optional[str] = None
+    dashboard_url: Optional[str] = None  # Node's dashboard server URL (port 9004)
     account_id: Optional[str] = Field(default=None, foreign_key="account.id")
     group_id: Optional[str] = Field(default=None, foreign_key="groups.id")
     status: Optional[str] = Field(default="IDLE")

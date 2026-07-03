@@ -1,11 +1,12 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Header, BackgroundTasks
 from pydantic import BaseModel
 from sqlmodel import Session, select
 from app.services.db import get_session
-from app.models import Task, StorageDrive, DriveAssignment, Group, TaskSnapshot
+from app.models import Task, StorageDrive, DriveAssignment, Group, TaskSnapshot, ComputeNode
 from typing import Optional, Dict, Any
 import uuid
 import json
+import jwt
 
 router = APIRouter()
 
@@ -38,6 +39,19 @@ class LeaderFailoverRequest(BaseModel):
     new_leader_id: str
 
 
+class TaskCreateRequest(BaseModel):
+    github_repo_url: Optional[str] = None
+    task_type: Optional[str] = None
+    initial_tcb: Optional[Dict[str, Any]] = None
+    requires_upload: bool = False  # True when the task needs files (e.g. blender .blend)
+
+
+class NodeDisconnectedRequest(BaseModel):
+    group_id: str
+    group_token: str
+    disconnected_node_id: str
+
+
 def _verify_group_token(group_id: str, group_token: str, session: Session) -> Group:
     group = session.get(Group, group_id)
     if not group:
@@ -45,6 +59,90 @@ def _verify_group_token(group_id: str, group_token: str, session: Session) -> Gr
     if group.group_token != group_token:
         raise HTTPException(status_code=403, detail="Invalid group token")
     return group
+
+
+def _get_engineer_payload(authorization: str = Header(None)) -> dict:
+    """Dependency: verify engineer JWT from Authorization header."""
+    from app.services.engineer_auth import verify_engineer_token
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or malformed Authorization header")
+    token = authorization.removeprefix("Bearer ")
+    try:
+        return verify_engineer_token(token)
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Engineer token has expired")
+    except jwt.PyJWTError as e:
+        raise HTTPException(status_code=401, detail=f"Invalid engineer token: {e}")
+
+
+@router.post("/tasks/create")
+async def create_task(
+    request: TaskCreateRequest,
+    background_tasks: BackgroundTasks,
+    engineer: dict = Depends(_get_engineer_payload),
+    session: Session = Depends(get_session),
+):
+    """
+    Engineer Dashboard calls this to initialise a new task.
+
+    If requires_upload=True the task starts as PENDING_UPLOAD — it waits for
+    the engineer to upload files through the leader node before execution begins.
+    If requires_upload=False the task starts as PENDING and nodes begin immediately.
+
+    Returns:
+      task_id         — persisted task ID
+      no_nodes_available — True when no IDLE nodes were found (engineer should
+                           start a node before or after this call)
+      requires_upload — echoed back so the dashboard knows to show the upload UI
+    """
+    # Determine initial state
+    initial_state = "PENDING_UPLOAD" if request.requires_upload else "PENDING"
+
+    task = Task(
+        global_State=initial_state,
+        github_repo_url=request.github_repo_url,
+        global_TCB=request.initial_tcb or {"task_type": request.task_type},
+        created_by=engineer.get("sub"),
+    )
+    session.add(task)
+    session.commit()
+    session.refresh(task)
+
+    # Synchronously check whether idle nodes exist so the response can include
+    # no_nodes_available — the actual push happens in the background.
+    idle_count = len(
+        session.exec(select(ComputeNode).where(ComputeNode.status == "IDLE")).all()
+    )
+    no_nodes = idle_count == 0
+
+    # Push role assignments to idle nodes asynchronously
+    background_tasks.add_task(_run_notify, task.id)
+
+    return {
+        "status": "created",
+        "task_id": task.id,
+        "task_state": initial_state,
+        "requires_upload": request.requires_upload,
+        "no_nodes_available": no_nodes,
+        "message": (
+            "No compute nodes are currently connected. "
+            "Please start a node — it will automatically pick up this task."
+            if no_nodes else
+            "Task created. Idle nodes will be notified momentarily."
+        ),
+    }
+
+
+async def _run_notify(task_id: str):
+    """Background helper — re-opens a fresh DB session for the notification push."""
+    from app.services.node_notifier import notify_idle_nodes
+    from app.services.db import get_engine
+    from sqlmodel import Session as Sess
+    engine = get_engine()
+    with Sess(engine) as fresh_session:
+        fresh_task = fresh_session.get(Task, task_id)
+        if fresh_task:
+            await notify_idle_nodes(fresh_task, fresh_session)
 
 
 @router.post("/tasks/quota")
@@ -160,7 +258,6 @@ def leader_failover(request: LeaderFailoverRequest, session: Session = Depends(g
     """
     group = _verify_group_token(request.group_id, request.group_token, session)
 
-    from app.models import ComputeNode
     new_leader = session.get(ComputeNode, request.new_leader_id)
     if not new_leader:
         raise HTTPException(status_code=404, detail="New leader node not found")
@@ -182,3 +279,31 @@ def leader_failover(request: LeaderFailoverRequest, session: Session = Depends(g
 
     session.commit()
     return {"status": "failover_complete", "new_leader": request.new_leader_id}
+
+
+@router.post("/groups/node-disconnected")
+def report_node_disconnected(
+    request: NodeDisconnectedRequest,
+    session: Session = Depends(get_session),
+):
+    """
+    Leader node reports that a worker has dropped from the mesh.
+    The controller marks that node as DISCONNECTED.
+    """
+    group = _verify_group_token(request.group_id, request.group_token, session)
+
+    # Verify the reported node is actually in this group
+    node = session.get(ComputeNode, request.disconnected_node_id)
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+    if node.group_id != group.id:
+        raise HTTPException(status_code=403, detail="Node does not belong to this group")
+
+    node.status = "DISCONNECTED"
+    session.add(node)
+    session.commit()
+
+    return {
+        "status": "recorded",
+        "disconnected_node": request.disconnected_node_id,
+    }

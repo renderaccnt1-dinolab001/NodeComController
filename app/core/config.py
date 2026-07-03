@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     PRIMARY_BACKEND_URL: str = "http://localhost:8001"
     CONTROLLER_API_KEY: str = ""
     DISCORD_OAuth2_MANNUAL_LOGIN_WEBHOOK_URL: str = ""
+    ENGINEER_JWT_SECRET: str = "change-me-in-production"
 
     class Config:
         env_file = ".env"

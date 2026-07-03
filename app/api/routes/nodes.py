@@ -2,9 +2,11 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 import httpx
 import uuid
+from typing import Optional
 from sqlmodel import Session, select
 from app.services.db import get_session
 from app.models import Account, ComputeNode, Group, Task
+from app.services.group_manager import create_group_for_task, assign_worker_to_group
 
 router = APIRouter()
 
@@ -12,6 +14,7 @@ router = APIRouter()
 class RegisterNodeRequest(BaseModel):
     google_auth_token: str
     url_addr: str
+    dashboard_url: Optional[str] = None  # Node's dashboard server URL (port 9004)
 
 
 @router.post("/register")
@@ -52,11 +55,18 @@ async def register_node(request: RegisterNodeRequest, session: Session = Depends
     # 3. Upsert ComputeNode
     node = session.get(ComputeNode, sub)
     if not node:
-        node = ComputeNode(id=sub, url_addr=request.url_addr, account_id=sub,
-                           session_token=session_token, status="IDLE")
+        node = ComputeNode(
+            id=sub,
+            url_addr=request.url_addr,
+            dashboard_url=request.dashboard_url,
+            account_id=sub,
+            session_token=session_token,
+            status="IDLE",
+        )
         session.add(node)
     else:
         node.url_addr = request.url_addr
+        node.dashboard_url = request.dashboard_url
         node.session_token = session_token
         node.status = "IDLE"
         node.group_id = None  # reset group on re-register
@@ -74,43 +84,29 @@ async def register_node(request: RegisterNodeRequest, session: Session = Depends
 
     if pending_task:
         # No group exists for this task — make this node the leader
-        group_token = str(uuid.uuid4())
-        new_group = Group(
-            task_id=pending_task.id,
-            group_lead=sub,
-            group_token=group_token
-        )
-        session.add(new_group)
+        group = create_group_for_task(pending_task.id, node, session)
         session.commit()
-        session.refresh(new_group)
-
-        # Assign node to the group
-        node.group_id = new_group.id
-        node.status = "LEADER"
-        session.add(node)
-        session.commit()
+        session.refresh(group)
 
         return {
             "status": "success",
             "role": "LEADER",
             "session_token": session_token,
-            "group_token": group_token,
-            "group_id": new_group.id,
+            "group_token": group.group_token,
+            "group_id": group.id,
             "task_id": pending_task.id,
             "github_repo_url": pending_task.github_repo_url,
             "global_TCB": pending_task.global_TCB,
         }
     else:
-        # Look for an existing group that needs more workers
+        # Look for an existing active group that needs more workers
         existing_group = session.exec(
             select(Group).where(Group.task_id != None)  # noqa: E711
         ).first()
 
         if existing_group:
             leader_node = session.get(ComputeNode, existing_group.group_lead)
-            node.group_id = existing_group.id
-            node.status = "WORKER"
-            session.add(node)
+            assign_worker_to_group(existing_group, node, session)
             session.commit()
 
             return {
