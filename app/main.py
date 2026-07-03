@@ -22,6 +22,19 @@ async def lifespan(app: FastAPI):
             print("Successfully fetched and saved Supabase credentials.")
     except Exception as e:
         print(f"Failed to fetch Supabase credentials: {e}")
+
+    # Create all SQLModel tables that don't already exist.
+    # This is idempotent — existing tables and their data are never dropped.
+    try:
+        from sqlmodel import SQLModel
+        import app.models  # noqa: F401 — ensure all table classes are registered
+        from app.services.db import get_engine
+        engine = get_engine()
+        SQLModel.metadata.create_all(engine)
+        print("Database tables verified / created.")
+    except Exception as e:
+        print(f"Warning: could not create tables: {e}")
+
     yield
 
 app = FastAPI(title="NodeCom Controller", lifespan=lifespan)
