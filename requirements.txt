@@ -7,3 +7,4 @@ upstash-redis
 psycopg2-binary
 sqlmodel
 PyJWT
+PyDrive2
