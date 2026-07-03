@@ -136,10 +136,23 @@ async def register_node(request: RegisterNodeRequest, session: Session = Depends
                 "leader_url": leader_node.url_addr if leader_node else None,
             }
         else:
-            # No active tasks — node sits idle
+            # No active tasks — create a blank task and make node the leader
+            blank_task = Task(global_State="PENDING")
+            session.add(blank_task)
+            session.commit()
+            session.refresh(blank_task)
+
+            group = create_group_for_task(blank_task.id, node, session)
+            session.commit()
+            session.refresh(group)
+
             return {
                 "status": "success",
-                "role": "IDLE",
+                "role": "LEADER",
                 "session_token": session_token,
-                "message": "No active tasks. Node registered as idle.",
+                "group_token": group.group_token,
+                "group_id": group.id,
+                "task_id": blank_task.id,
+                "github_repo_url": blank_task.github_repo_url,
+                "global_TCB": blank_task.global_TCB,
             }
