@@ -4,7 +4,7 @@ import httpx
 import uuid
 from typing import Optional
 from sqlmodel import Session, select
-from app.services.db import get_session
+from app.services.db_session import get_session
 from app.models import Account, ComputeNode, Group, Task
 from app.services.group_manager import create_group_for_task, assign_worker_to_group
 

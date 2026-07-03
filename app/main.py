@@ -8,44 +8,35 @@ from app.core.config import settings
 from app.services.kv_storage import StorageService
 
 
+def initialize_database():
+    from app.core.config import settings
+    from app.services.kv_storage import StorageService
+    print("Loading Supabase credentials from KV...")
+    for field in ("db_user", "db_password", "db_host", "db_name", "db_port"):
+        value = StorageService.get_data(field)
+        if value:
+            object.__setattr__(settings, field, int(value) if field == "db_port" else value)
+            
+    print("Connecting to Supabase and ensuring tables exist...")
+    try:
+        if settings.db_user:
+            from app.services.db_session import get_engine
+            from sqlmodel import SQLModel
+            import app.models  # registers all table classes
+            pg_engine = get_engine()
+            SQLModel.metadata.create_all(pg_engine)
+            print("Supabase tables verified.")
+            return True
+        else:
+            print("Warning: No Supabase credentials loaded. Operating in Drive-only mode.")
+            return False
+    except Exception as e:
+        print(f"[Startup/Refresh] Postgres table creation skipped or failed. Falling back to Drive DB. ({e})")
+        return False
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ── Step 1: Fetch Supabase credentials from the Primary Backend ───────────
-    # The Primary Backend is the single source of truth for all secrets.
-    # It verifies the request with the x-controller-api-key header.
-    print("Fetching Supabase credentials from Primary Backend...")
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(
-                f"{settings.PRIMARY_BACKEND_URL}/api/controllers/credentials/supabase",
-                headers={"x-controller-api-key": settings.CONTROLLER_API_KEY},
-                follow_redirects=True,
-            )
-            response.raise_for_status()
-            creds = response.json()
-            if not creds.get("db_host") or not creds.get("db_password"):
-                raise ValueError(
-                    "Primary Backend returned empty DB credentials. "
-                    "Add db_host / db_password / db_user / db_name to the "
-                    "Primary Backend's environment variables (Vercel dashboard)."
-                )
-            StorageService.save_data("supabase_creds", json.dumps(creds))
-            print("Supabase credentials fetched and cached in KV.")
-    except Exception as e:
-        print(f"[Warning] Could not fetch Supabase credentials: {e}")
-
-    # ── Step 2: Create all SQLModel tables (idempotent) ───────────────────────
-    # Uses the credentials just stored in KV (or falls back to env vars).
-    try:
-        from sqlmodel import SQLModel
-        import app.models  # noqa: F401 — registers all table classes
-        from app.services.db import get_engine
-        engine = get_engine()
-        SQLModel.metadata.create_all(engine)
-        print("Database tables verified / created.")
-    except Exception as e:
-        print(f"[Warning] Could not create/verify tables: {e}")
-
+    initialize_database()
     yield
 
 

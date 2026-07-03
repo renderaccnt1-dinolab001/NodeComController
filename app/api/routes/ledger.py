@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlmodel import Session, select
-from app.services.db import get_session
+from app.services.db_session import get_session
 from app.models import Account, Transaction
 
 router = APIRouter()

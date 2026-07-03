@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 import jwt
 
-from app.services.db import get_session
+from app.services.db_session import get_session
 from app.services.engineer_auth import create_engineer_token, verify_engineer_token
 from app.models import ComputeNode, Group, Task
 

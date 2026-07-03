@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, Header, BackgroundTasks
 from pydantic import BaseModel
 from sqlmodel import Session, select
-from app.services.db import get_session
+from app.services.db_session import get_session
 from app.models import Task, StorageDrive, DriveAssignment, Group, TaskSnapshot, ComputeNode
 from typing import Optional, Dict, Any
 import uuid
@@ -136,7 +136,7 @@ async def create_task(
 async def _run_notify(task_id: str):
     """Background helper — re-opens a fresh DB session for the notification push."""
     from app.services.node_notifier import notify_idle_nodes
-    from app.services.db import get_engine
+    from app.services.db_session import get_engine
     from sqlmodel import Session as Sess
     engine = get_engine()
     with Sess(engine) as fresh_session:
