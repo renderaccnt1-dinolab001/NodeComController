@@ -6,4 +6,4 @@ pydantic-settings
 upstash-redis
 psycopg2-binary
 sqlmodel
-PyJWTP
+PyJWT
